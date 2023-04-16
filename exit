@@ -1,0 +1,219 @@
+[1mdiff --git a/guided_diffusion/gaussian_diffusion.py b/guided_diffusion/gaussian_diffusion.py[m
+[1mindex 01063a1..ddb845c 100644[m
+[1m--- a/guided_diffusion/gaussian_diffusion.py[m
+[1m+++ b/guided_diffusion/gaussian_diffusion.py[m
+[36m@@ -975,18 +975,23 @@[m [mclass GaussianDiffusion:[m
+         if noise is None:[m
+             noise = th.randn_like(x_start[:, -1:, ...])[m
+ [m
+[31m-[m
+[32m+[m[32m        # print(x_start.shape)[m
+         mask = x_start[:, -1:, ...][m
+         res = torch.where(mask > 0, 1, 0)   #merge all tumor classes into one to get a binary segmentation mask[m
+[31m-[m
+[32m+[m[32m        # print(res.shape)[m
+         res_t = self.q_sample(res, t, noise=noise)     #add noise to the segmentation channel[m
+[32m+[m[32m        # print(res_t.shape)[m
+         x_t=x_start.float()[m
+         x_t[:, -1:, ...]=res_t.float()[m
+[32m+[m[32m        # print(x_t.shape)[m
+[32m+[m[41m     [m
+         terms = {}[m
+ [m
+ [m
+         if self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:[m
+ [m
+[32m+[m[41m         [m
+[32m+[m[41m            [m
+             model_output, cal = model(x_t, self._scale_timesteps(t), **model_kwargs)[m
+             if self.model_var_type in [[m
+                 ModelVarType.LEARNED,[m
+[1mdiff --git a/guided_diffusion/isicloader.py b/guided_diffusion/isicloader.py[m
+[1mindex 6ad9c38..9890f81 100644[m
+[1m--- a/guided_diffusion/isicloader.py[m
+[1m+++ b/guided_diffusion/isicloader.py[m
+[36m@@ -51,6 +51,7 @@[m [mclass ISICDataset(Dataset):[m
+             mask = self.transform(mask)[m
+ [m
+         if self.mode == 'Training':[m
+[31m-            return (img, mask)[m
+[32m+[m[41m            [m
+[32m+[m[32m            return (img, mask,name)[m
+         else:[m
+             return (img, mask, name)[m
+\ No newline at end of file[m
+[1mdiff --git a/guided_diffusion/train_util.py b/guided_diffusion/train_util.py[m
+[1mindex 11ae9e5..dba9012 100644[m
+[1m--- a/guided_diffusion/train_util.py[m
+[1m+++ b/guided_diffusion/train_util.py[m
+[36m@@ -176,13 +176,16 @@[m [mclass TrainLoop:[m
+ [m
+ [m
+             try:[m
+[32m+[m[41m                  [m
+                     batch, cond, name = next(data_iter)[m
+[32m+[m[41m                [m
+[32m+[m[41m                    [m
+             except StopIteration:[m
+                     # StopIteration is thrown if dataset ends[m
+                     # reinitialize data loader[m
+                     data_iter = iter(self.dataloader)[m
+                     batch, cond, name = next(data_iter)[m
+[31m-[m
+[32m+[m[32m                    # print(batch.shape)[m
+             self.run_step(batch, cond)[m
+ [m
+            [m
+[36m@@ -202,8 +205,8 @@[m [mclass TrainLoop:[m
+ [m
+     def run_step(self, batch, cond):[m
+         batch=th.cat((batch, cond), dim=1)[m
+[31m-[m
+         cond={}[m
+[32m+[m
+         sample = self.forward_backward(batch, cond)[m
+         took_step = self.mp_trainer.optimize(self.opt)[m
+         if took_step:[m
+[36m@@ -221,10 +224,12 @@[m [mclass TrainLoop:[m
+                 k: v[i : i + self.microbatch].to(dist_util.dev())[m
+                 for k, v in cond.items()[m
+             }[m
+[32m+[m[32m            # print(micro_cond.keys())[m
+ [m
+             last_batch = (i + self.microbatch) >= batch.shape[0][m
+             t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())[m
+[31m-[m
+[32m+[m[41m            [m
+[32m+[m[41m     [m
+             compute_losses = functools.partial([m
+                 self.diffusion.training_losses_segmentation,[m
+                 self.ddp_model,[m
+[1mdiff --git a/guided_diffusion/unet.py b/guided_diffusion/unet.py[m
+[1mindex 0fcc23f..9a49186 100644[m
+[1m--- a/guided_diffusion/unet.py[m
+[1m+++ b/guided_diffusion/unet.py[m
+[36m@@ -79,11 +79,14 @@[m [mclass TimestepEmbedSequential(nn.Sequential, TimestepBlock):[m
+     """[m
+ [m
+     def forward(self, x, emb):[m
+[32m+[m[41m        [m
+         for layer in self:[m
+             if isinstance(layer, TimestepBlock):[m
+                 x = layer(x, emb)[m
+[32m+[m[32m                # print('unet',x.shape)[m
+             else:[m
+                 x = layer(x)[m
+[32m+[m[32m                # print('unet new',x.shape)[m
+         return x[m
+ [m
+ [m
+[36m@@ -537,6 +540,8 @@[m [mclass UNetModel(nn.Module):[m
+         use_new_attention_order=False,[m
+         high_way = True,[m
+     ):[m
+[32m+[m[41m        [m
+[32m+[m
+         super().__init__()[m
+ [m
+         if num_heads_upsample == -1:[m
+[36m@@ -1018,7 +1023,7 @@[m [mclass EncoderUNetModel(nn.Module):[m
+             h = self.gap(h)[m
+             N = h.shape[0][m
+             h = h.reshape(N, -1)[m
+[31m-            print('h1', h.shape)[m
+[32m+[m[32m            # print('h1', h.shape)[m
+             return self.out(h)[m
+         else:[m
+             h = h.type(x.dtype)[m
+[1mdiff --git a/scripts/segmentation_sample.py b/scripts/segmentation_sample.py[m
+[1mindex a719c06..39146ce 100644[m
+[1m--- a/scripts/segmentation_sample.py[m
+[1m+++ b/scripts/segmentation_sample.py[m
+[36m@@ -17,6 +17,7 @@[m [mimport torch.distributed as dist[m
+ from guided_diffusion import dist_util, logger[m
+ from guided_diffusion.bratsloader import BRATSDataset, BRATSDataset3D[m
+ from guided_diffusion.isicloader import ISICDataset[m
+[32m+[m[32mfrom guided_diffusion.our_dataset import OurDataset[m
+ import torchvision.utils as vutils[m
+ from guided_diffusion.utils import staple[m
+ from guided_diffusion.script_util import ([m
+[36m@@ -58,6 +59,14 @@[m [mdef main():[m
+ [m
+         ds = BRATSDataset3D(args.data_dir,transform_test)[m
+         args.in_ch = 5[m
+[32m+[m[41m        [m
+[32m+[m[32m    elif args.data_name == 'OURS':[m
+[32m+[m[32m        tran_list = [transforms.Resize((args.image_size,args.image_size)),][m
+[32m+[m[32m        transform_train = transforms.Compose(tran_list)[m
+[32m+[m
+[32m+[m[32m        ds = OurDataset(args.data_dir, transform_train, test_flag=False)[m
+[32m+[m[32m        args.in_ch = 4[m
+[32m+[m[41m        [m
+     datal = th.utils.data.DataLoader([m
+         ds,[m
+         batch_size=1,[m
+[36m@@ -69,6 +78,11 @@[m [mdef main():[m
+     model, diffusion = create_model_and_diffusion([m
+         **args_to_dict(args, model_and_diffusion_defaults().keys())[m
+     )[m
+[32m+[m[32m    if args.multi_gpu:[m
+[32m+[m[32m        model = th.nn.DataParallel(model,device_ids=[int(id) for id in args.multi_gpu.split(',')])[m
+[32m+[m[32m        model.to(device = th.device('cuda', int(args.gpu_dev)))[m
+[32m+[m[32m    else:[m
+[32m+[m[32m        model.to(dist_util.dev())[m
+     all_images = [][m
+ [m
+ [m
+[36m@@ -98,7 +112,9 @@[m [mdef main():[m
+         elif args.data_name == 'BRATS':[m
+             # slice_ID=path[0].split("_")[2] + "_" + path[0].split("_")[4][m
+             slice_ID=path[0].split("_")[-3] + "_" + path[0].split("slice")[-1].split('.nii')[0][m
+[31m-[m
+[32m+[m[32m        elif args.data_name == 'OURS':[m
+[32m+[m[41m           [m
+[32m+[m[32m            slice_ID=path[0].split("/")[-1].split(".")[0][m
+         logger.log("sampling...")[m
+ [m
+         start = th.cuda.Event(enable_timing=True)[m
+[1mdiff --git a/scripts/segmentation_train.py b/scripts/segmentation_train.py[m
+[1mindex 4e789f9..0f30d39 100644[m
+[1m--- a/scripts/segmentation_train.py[m
+[1m+++ b/scripts/segmentation_train.py[m
+[36m@@ -6,6 +6,7 @@[m [msys.path.append(".")[m
+ from guided_diffusion import dist_util, logger[m
+ from guided_diffusion.resample import create_named_schedule_sampler[m
+ from guided_diffusion.bratsloader import BRATSDataset, BRATSDataset3D[m
+[32m+[m[32mfrom guided_diffusion.our_dataset import OurDataset[m
+ from guided_diffusion.isicloader import ISICDataset[m
+ from guided_diffusion.script_util import ([m
+     model_and_diffusion_defaults,[m
+[36m@@ -39,6 +40,12 @@[m [mdef main():[m
+ [m
+         ds = BRATSDataset3D(args.data_dir, transform_train, test_flag=False)[m
+         args.in_ch = 5[m
+[32m+[m[32m    elif args.data_name == 'OURS':[m
+[32m+[m[32m        tran_list = [transforms.Resize((args.image_size,args.image_size)),][m
+[32m+[m[32m        transform_train = transforms.Compose(tran_list)[m
+[32m+[m
+[32m+[m[32m        ds = OurDataset(args.data_dir, transform_train, test_flag=False)[m
+[32m+[m[32m        args.in_ch = 4[m
+     datal= th.utils.data.DataLoader([m
+         ds,[m
+         batch_size=args.batch_size,[m
+[36m@@ -59,6 +66,7 @@[m [mdef main():[m
+ [m
+ [m
+     logger.log("training...")[m
+[32m+[m[32m    print(args.lr_anneal_steps)[m
+     TrainLoop([m
+         model=model,[m
+         diffusion=diffusion,[m
+[36m@@ -97,7 +105,7 @@[m [mdef create_argparser():[m
+         use_fp16=False,[m
+         fp16_scale_growth=1e-3,[m
+         gpu_dev = "0",[m
+[31m-        multi_gpu = None, #"0,1,2"[m
+[32m+[m[32m        multi_gpu ="0,1", #"0,1,2"[m
+         out_dir='./results/'[m
+     )[m
+     defaults.update(model_and_diffusion_defaults())[m
